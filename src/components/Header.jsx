@@ -6,41 +6,28 @@ const headerStyle = {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: '10px 20px',
-    backgroundColor: '#1e1e1e', // Matches widget color
+    padding: '0 20px',
+    height: '60px',
+    backgroundColor: '#1e1e1e',
     borderBottom: '1px solid #333',
-    color: '#e0e0e0'
+    color: '#e0e0e0',
+    flexShrink: 0
 };
-
-const titleStyle = {
-    fontSize: '1.5em',
-    fontWeight: 'bold',
-};
-
+const titleStyle = { fontSize: '1.5em', fontWeight: 'bold' };
 const buttonStyle = {
-    padding: '8px 16px',
-    borderRadius: '6px',
-    border: 'none',
-    background: '#333',
-    color: 'white',
-    cursor: 'pointer',
-    fontWeight: 'bold'
+    padding: '8px 16px', borderRadius: '6px', border: 'none',
+    background: '#333', color: 'white', cursor: 'pointer', fontWeight: 'bold'
 };
 
 function Header() {
     const handleSignOut = async () => {
         await supabase.auth.signOut();
-        // The onAuthStateChange listener in App.jsx will handle the rest.
     };
-
     return (
         <header style={headerStyle}>
             <div style={titleStyle}>Live Skill Tree</div>
-            <button style={buttonStyle} onClick={handleSignOut}>
-                Sign Out
-            </button>
+            <button style={buttonStyle} onClick={handleSignOut}>Sign Out</button>
         </header>
     );
 }
-
 export default Header;

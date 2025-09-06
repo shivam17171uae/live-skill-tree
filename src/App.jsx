@@ -6,23 +6,20 @@ import { loadProgressFromDB, saveProgressToDB, createProfileForNewUser } from '.
 import { getDefaultPlayerState, getDefaultGameData } from './data';
 import Auth from './components/Auth';
 import Header from './components/Header';
-import ThreeCanvas from './components/ThreeCanvas';
-import StatsWidget from './components/StatsWidget';
-import TaskWidget from './components/TaskWidget';
-import InfoWidgets from './components/InfoWidgets';
+import CharacterProfile from './components/CharacterProfile';
+import HabitGrid from './components/HabitGrid';
 
 function App() {
   const [session, setSession] = useState(null);
   const [playerState, setPlayerState] = useState(null);
   const [gameData, setGameData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [justClickedHabit, setJustClickedHabit] = useState(null);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setLoading(false);
-    });
+    supabase.auth.getSession().then(({ data: { session } }) => { setSession(session); setLoading(false); });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!session) { setPlayerState(null); setGameData(null); }
       setSession(session);
     });
     return () => subscription.unsubscribe();
@@ -30,22 +27,24 @@ function App() {
 
   useEffect(() => {
     const loadData = async () => {
-      if (session) {
-        setLoading(true); // Set loading to true when we START fetching data
+      if (session && !playerState) {
+        setLoading(true);
         const data = await loadProgressFromDB(session.user.id);
-        if (!data || !data.player_state) {
-          await createProfileForNewUser(session.user.id, getDefaultPlayerState(), getDefaultGameData());
-          setPlayerState(getDefaultPlayerState());
-          setGameData(getDefaultGameData());
+        if (!data || !data.player_state || !data.game_data) {
+          const defaultPlayer = getDefaultPlayerState();
+          const defaultGame = getDefaultGameData();
+          await createProfileForNewUser(session.user.id, defaultPlayer, defaultGame);
+          setPlayerState(defaultPlayer);
+          setGameData(defaultGame);
         } else {
           setPlayerState(data.player_state);
           setGameData(data.game_data);
         }
-        setLoading(false); // Set loading to false when we are DONE
+        setLoading(false);
       }
     };
     loadData();
-  }, [session]);
+  }, [session, playerState]);
 
   useEffect(() => {
     if (!loading && playerState && gameData && session) {
@@ -54,35 +53,80 @@ function App() {
     }
   }, [playerState, gameData, loading, session]);
 
-  // Handler functions remain the same
-  const handleTaskUpdate = (category, index, isCompleted) => { const newPlayerState = { ...playerState, stats: { ...playerState.stats } }; const newGameData = JSON.parse(JSON.stringify(gameData)); const task = newGameData.tasks[category].tasks[index]; if (isCompleted === task.completed) return; task.completed = isCompleted; const xpChange = isCompleted ? newGameData.tasks[category].xp : -newGameData.tasks[category].xp; const statChange = isCompleted ? 1 : -1; newPlayerState.xp += xpChange; newPlayerState.stats[newGameData.tasks[category].stat] += statChange; setPlayerState(newPlayerState); setGameData(newGameData); };
-  const handleTaskAdd = (taskText) => { const newGameData = JSON.parse(JSON.stringify(gameData)); newGameData.tasks["Discipline & Chores"].tasks.push({ text: taskText, completed: false }); setGameData(newGameData); };
-  const handleTaskDelete = (category, index) => { const newGameData = JSON.parse(JSON.stringify(gameData)); newGameData.tasks[category].tasks.splice(index, 1); setGameData(newGameData); };
+  const handleHabitClick = useCallback((name, type) => {
+    const newPlayerState = { ...playerState, stats: { ...playerState.stats } };
+    const newGameData = JSON.parse(JSON.stringify(gameData));
+    const dataSet = newGameData[type];
+    if (!dataSet || !dataSet[name]) return;
+    if (type === 'good_habits' || type === 'bad_habits') {
+      const habit = dataSet[name];
+      habit.completed = !habit.completed;
+      const xpChange = habit.completed ? habit.xp : -habit.xp;
+      newPlayerState.xp += xpChange;
+      if (habit.stat) {
+        const statChange = habit.completed ? 1 : -1;
+        newPlayerState.stats[habit.stat] += statChange;
+      }
+      setJustClickedHabit({ name, type });
+      setTimeout(() => setJustClickedHabit(null), 400);
+    } else if (type === 'rewards') {
+      const reward = dataSet[name];
+      if (newPlayerState.xp >= reward.cost) {
+        newPlayerState.xp -= reward.cost;
+        alert(`You redeemed the reward: ${name}!`);
+      } else {
+        alert("Not enough XP!");
+      }
+    }
+    setPlayerState(newPlayerState);
+    setGameData(newGameData);
+  }, [playerState, gameData]);
 
-  // --- THE FINAL FIX: The Definitive Conditional Rendering Logic ---
+  const handleAddItem = useCallback((name, newItem, type) => {
+    if (gameData[type] && gameData[type][name]) {
+      alert(`An item named "${name}" already exists.`);
+      return;
+    }
+    setGameData(prevGameData => {
+      const newGameData = JSON.parse(JSON.stringify(prevGameData));
+      if (!newGameData[type]) {
+        newGameData[type] = {};
+      }
+      newGameData[type][name] = newItem;
+      return newGameData;
+    });
+  }, [gameData]);
 
-  // If we don't know the auth state yet, show nothing or a primary loader
-  if (loading && session === null) {
-    return <div className="loading-overlay"><div className="spinner"></div></div>;
-  }
+  if (loading) { return <div className="loading-overlay"><div className="spinner"></div></div>; }
+  if (!session) { return <Auth />; }
+  if (!playerState || !gameData) { return <div className="loading-overlay"><div className="spinner"></div></div>; }
 
-  // If we know the auth state and there is no user, show the login page
-  if (!session) {
-    return <Auth />;
-  }
+  const totalPossibleXP = Object.values(gameData.good_habits || {}).reduce((sum, habit) => sum + habit.xp, 0);
+  const todayExps = Object.values(gameData.good_habits || {}).reduce((sum, habit) => (habit.completed ? sum + habit.xp : sum), 0);
+  const dailyProgress = totalPossibleXP > 0 ? Math.round((todayExps / totalPossibleXP) * 100) : 0;
 
-  // If there IS a user session, but we are still loading their data, show the loader
-  if (loading || !playerState || !gameData) {
-    return <div className="loading-overlay"><div className="spinner"></div></div>;
-  }
-
-  // If we have a session AND the data is loaded, show the dashboard
   return (
-    <div className="dashboard-grid">
-      <div className="header-area widget"><Header /></div>
-      <div className="grid-column col1-area"><div id="canvas-container" className="widget"><ThreeCanvas /></div></div>
-      <div className="grid-column col2-area"><InfoWidgets playerState={playerState} achievements={gameData.achievements} /><StatsWidget stats={playerState.stats} /></div>
-      <div className="grid-column col3-area"><TaskWidget tasks={gameData.tasks} onTaskUpdate={handleTaskUpdate} onTaskAdd={handleTaskAdd} onTaskDelete={handleTaskDelete} /></div>
+    <div className="app-container">
+      <Header />
+      <div className="dashboard-grid">
+        <div className="grid-column">
+          <CharacterProfile playerState={playerState} todayExps={todayExps} dailyProgress={dailyProgress} />
+        </div>
+        <div className="grid-column" id="habits-container">
+          <HabitGrid title="Daily Habits" icon="✅" habits={gameData.good_habits} onHabitClick={handleHabitClick} type="good_habits" justClickedHabit={justClickedHabit} onAddItem={handleAddItem} />
+          <HabitGrid title="Bad Habits" icon="❌" habits={gameData.bad_habits} onHabitClick={handleHabitClick} type="bad_habits" justClickedHabit={justClickedHabit} onAddItem={handleAddItem} />
+          <HabitGrid
+            title="Rewards"
+            icon="🏆"
+            habits={gameData.rewards}
+            onHabitClick={handleHabitClick}
+            type="rewards"
+            playerXp={playerState.xp}
+            className="grid-span-2"
+            onAddItem={handleAddItem}
+          />
+        </div>
+      </div>
     </div>
   );
 }
